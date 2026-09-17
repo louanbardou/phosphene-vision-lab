@@ -13,7 +13,7 @@ This file is the UI layer only. All model/science logic lives in pipeline.py
 
 import numpy as np
 import streamlit as st
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 # --------------------------------------------------------------------------
 # Pipeline import (guarded so the UI shell still loads if pipeline.py is not
@@ -329,10 +329,63 @@ def render_brain_slice(
     return img.resize((img.width * upscale, img.height * upscale), resample=Image.NEAREST)
 
 
-def array_to_gray_image(arr: np.ndarray) -> Image.Image:
-    """Render a [0,1] float array as an 8-bit grayscale image."""
-    a = np.clip(np.asarray(arr, dtype=np.float64), 0.0, 1.0)
-    return Image.fromarray((a * 255).astype(np.uint8), mode="L")
+def render_phosphene_with_axes(
+    phosphene: np.ndarray, sim_params: dict, upscale: int = 3, n_ticks: int = 5,
+) -> Image.Image:
+    """Render a phosphene percept anchored in the real visual-field
+    coordinates dynaphos itself simulates in (degrees of visual angle,
+    origin = fixation), instead of an unlabeled black canvas — the same
+    axes convention used in the dynaphos paper's own figures."""
+    res_x, res_y = sim_params["run"]["resolution"]
+    view_angle = float(sim_params["run"]["view_angle"])
+    origin_x, origin_y = sim_params["run"]["origin"]
+    hemi = view_angle / 2.0
+    x_min, x_max = origin_x - hemi, origin_x + hemi
+    y_min, y_max = origin_y - hemi, origin_y + hemi
+
+    gray = np.clip(np.asarray(phosphene, dtype=np.float64), 0.0, 1.0)
+    img_w, img_h = int(res_x * upscale), int(res_y * upscale)
+    base = Image.fromarray((gray * 255).astype(np.uint8), mode="L").convert("RGB")
+    base = base.resize((img_w, img_h), resample=Image.NEAREST)
+
+    margin_l, margin_b, margin_t, margin_r = 40, 34, 10, 10
+    canvas = Image.new("RGB", (img_w + margin_l + margin_r, img_h + margin_t + margin_b), (10, 12, 16))
+    canvas.paste(base, (margin_l, margin_t))
+    draw = ImageDraw.Draw(canvas)
+    font = ImageFont.load_default()
+    tick_color = (139, 147, 167)
+    border_color = (60, 66, 82)
+
+    draw.rectangle(
+        [margin_l, margin_t, margin_l + img_w - 1, margin_t + img_h - 1],
+        outline=border_color, width=1,
+    )
+
+    for tv in np.linspace(x_min, x_max, n_ticks):
+        frac = (tv - x_min) / (x_max - x_min) if x_max > x_min else 0.5
+        px = margin_l + frac * (img_w - 1)
+        draw.line([(px, margin_t + img_h), (px, margin_t + img_h + 4)], fill=tick_color, width=1)
+        draw.text((px - 7, margin_t + img_h + 6), f"{tv:.0f}°", fill=tick_color, font=font)
+
+    for tv in np.linspace(y_min, y_max, n_ticks):
+        frac = (tv - y_min) / (y_max - y_min) if y_max > y_min else 0.5
+        py = margin_t + img_h - frac * (img_h - 1)  # up = +elevation
+        draw.line([(margin_l - 4, py), (margin_l, py)], fill=tick_color, width=1)
+        draw.text((2, py - 5), f"{tv:.0f}°", fill=tick_color, font=font)
+
+    ox_frac = (origin_x - x_min) / (x_max - x_min) if x_max > x_min else 0.5
+    oy_frac = (origin_y - y_min) / (y_max - y_min) if y_max > y_min else 0.5
+    ox_px = margin_l + ox_frac * (img_w - 1)
+    oy_px = margin_t + img_h - oy_frac * (img_h - 1)
+    r = 4
+    cross_color = (217, 164, 65)
+    draw.line([(ox_px - r, oy_px), (ox_px + r, oy_px)], fill=cross_color, width=1)
+    draw.line([(ox_px, oy_px - r), (ox_px, oy_px + r)], fill=cross_color, width=1)
+
+    caption = "azimuth / elevation, deg. visual angle · + = fixation"
+    draw.text((margin_l, margin_t + img_h + 18), caption, fill=tick_color, font=font)
+
+    return canvas
 
 
 def to_numpy(x):
@@ -592,6 +645,7 @@ if run_clicked:
             st.session_state["pv_v1_target"] = to_numpy(v1_target)
             st.session_state["pv_brain"] = brain
             st.session_state["pv_v1_volume"] = v1_volume
+            st.session_state["pv_sim_params"] = sim_params
             st.session_state["pv_meta"] = dict(
                 subject=subject,
                 model_variant=model_variant,
@@ -616,6 +670,7 @@ if "pv_result" in st.session_state:
     result = st.session_state["pv_result"]
     meta = st.session_state["pv_meta"]
     result_image = st.session_state["pv_input_image"]
+    sim_params = st.session_state["pv_sim_params"]
 
     final_phosphene = np.asarray(result.get("final_phosphene"))
     frames = result.get("frames") or []
@@ -682,10 +737,11 @@ if "pv_result" in st.session_state:
             )
             st.markdown(
                 '<div class="pv-panel-caption">Final phosphene pattern from the dynaphos '
-                "simulator after optimization.</div>",
+                "simulator after optimization, anchored in degrees of visual angle "
+                "(dynaphos's own coordinate system).</div>",
                 unsafe_allow_html=True,
             )
-            st.image(array_to_gray_image(final_phosphene), use_container_width=True, clamp=True)
+            st.image(render_phosphene_with_axes(final_phosphene, sim_params), use_container_width=True)
 
     with col4:
         with st.container(border=True):
@@ -707,9 +763,8 @@ if "pv_result" in st.session_state:
                     label_visibility="collapsed",
                 )
                 st.image(
-                    array_to_gray_image(np.asarray(frames[frame_idx])),
+                    render_phosphene_with_axes(np.asarray(frames[frame_idx]), sim_params),
                     use_container_width=True,
-                    clamp=True,
                 )
             else:
                 st.info("No intermediate frames were returned by the optimizer.")
