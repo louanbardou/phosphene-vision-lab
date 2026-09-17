@@ -25,6 +25,8 @@ try:
         MODEL_VARIANTS,
         load_backbone,
         load_v1_weights,
+        load_brain_volumes,
+        v1_response_to_volume,
         preprocess_image,
         extract_v1_target,
         build_simulator,
@@ -250,6 +252,10 @@ if PIPELINE_AVAILABLE:
     def cached_load_v1_weights(subject: str, model_variant: str):
         return load_v1_weights(subject, model_variant)
 
+    @st.cache_resource(show_spinner=False)
+    def cached_load_brain_volumes(subject: str):
+        return load_brain_volumes(subject)
+
 
 # ==========================================================================
 # Small rendering helpers (dependency-free: numpy + PIL only)
@@ -279,30 +285,48 @@ def _apply_colormap(norm: np.ndarray, nan_mask: np.ndarray) -> np.ndarray:
     return rgb.astype(np.uint8)
 
 
-def render_vector_heatmap(vector: np.ndarray, cell_px: int = 9) -> Image.Image:
-    """Render a 1D vector (e.g. ~1000+ V1 target values) as a compact 2D
-    heatmap strip, roughly square, rather than literal brain anatomy."""
-    v = np.asarray(vector, dtype=np.float64).ravel()
-    n = max(v.size, 1)
-    cols = int(np.ceil(np.sqrt(n)))
-    rows = int(np.ceil(n / cols))
-    padded = np.full(rows * cols, np.nan)
-    padded[:n] = v
-    grid = padded.reshape(rows, cols)
+AXIS_OPTIONS = {"Sagittal": 0, "Coronal": 1, "Axial": 2}
 
-    finite = v[np.isfinite(v)]
-    vmin = float(np.min(finite)) if finite.size else 0.0
-    vmax = float(np.max(finite)) if finite.size else 1.0
-    rng = (vmax - vmin) if vmax > vmin else 1.0
-    norm = np.clip((grid - vmin) / rng, 0.0, 1.0)
-    nan_mask = np.isnan(grid)
 
-    rgb = _apply_colormap(norm, nan_mask)
-    img = Image.fromarray(rgb, mode="RGB")
-    target_w = min(cols * cell_px, 420)
-    scale = max(1, target_w // max(cols, 1))
-    img = img.resize((cols * scale, rows * scale), resample=Image.NEAREST)
-    return img
+def render_brain_slice(
+    t1: np.ndarray, v1_volume: np.ndarray, axis: int, index: int,
+    overlay_alpha: float = 0.75, upscale: int = 4,
+) -> Image.Image:
+    """Render one real anatomical slice (T1, subject-native func1pt8mm space)
+    with the predicted V1 response overlaid in color wherever a V1 voxel
+    exists on that slice. `axis` is 0=sagittal, 1=coronal, 2=axial."""
+
+    def _take(vol: np.ndarray) -> np.ndarray:
+        if axis == 0:
+            return vol[index, :, :]
+        if axis == 1:
+            return vol[:, index, :]
+        return vol[:, :, index]
+
+    t1_slice = _take(t1)
+    v1_slice = _take(v1_volume)
+
+    finite_t1 = t1_slice[np.isfinite(t1_slice)]
+    lo, hi = (np.percentile(finite_t1, 1), np.percentile(finite_t1, 99)) if finite_t1.size else (0.0, 1.0)
+    hi = hi if hi > lo else lo + 1.0
+    gray = np.clip((t1_slice - lo) / (hi - lo), 0.0, 1.0)
+    base_rgb = np.stack([gray, gray, gray], axis=-1)
+
+    v1_mask = np.isfinite(v1_slice)
+    out = base_rgb
+    if v1_mask.any():
+        finite_v1 = v1_slice[v1_mask]
+        vmin, vmax = float(finite_v1.min()), float(finite_v1.max())
+        rng = (vmax - vmin) if vmax > vmin else 1.0
+        norm = np.clip((v1_slice - vmin) / rng, 0.0, 1.0)
+        overlay_rgb = _apply_colormap(norm, ~v1_mask).astype(np.float64) / 255.0
+        out = base_rgb.copy()
+        out[v1_mask] = (1 - overlay_alpha) * base_rgb[v1_mask] + overlay_alpha * overlay_rgb[v1_mask]
+
+    arr = (np.clip(out, 0.0, 1.0) * 255).astype(np.uint8)
+    arr = np.rot90(arr)  # NSD volumes are stored so a raw slice reads sideways
+    img = Image.fromarray(arr, mode="RGB")
+    return img.resize((img.width * upscale, img.height * upscale), resample=Image.NEAREST)
 
 
 def array_to_gray_image(arr: np.ndarray) -> Image.Image:
@@ -520,6 +544,10 @@ if run_clicked:
                 image_tensor = preprocess_image(input_image)
                 v1_target = extract_v1_target(backbone, v1_weights, image_tensor)
 
+            with st.spinner(f"Loading subject {subject}'s real anatomical brain volume..."):
+                brain = cached_load_brain_volumes(subject)
+                v1_volume = v1_response_to_volume(subject, model_variant, to_numpy(v1_target))
+
             with st.spinner("Building the cortical phosphene simulator..."):
                 simulator, sim_params = build_simulator(n_electrodes_side, dropout, jitter)
 
@@ -562,6 +590,8 @@ if run_clicked:
             st.session_state["pv_result"] = result
             st.session_state["pv_input_image"] = input_image
             st.session_state["pv_v1_target"] = to_numpy(v1_target)
+            st.session_state["pv_brain"] = brain
+            st.session_state["pv_v1_volume"] = v1_volume
             st.session_state["pv_meta"] = dict(
                 subject=subject,
                 model_variant=model_variant,
@@ -586,7 +616,6 @@ if "pv_result" in st.session_state:
     result = st.session_state["pv_result"]
     meta = st.session_state["pv_meta"]
     result_image = st.session_state["pv_input_image"]
-    v1_target_np = st.session_state["pv_v1_target"]
 
     final_phosphene = np.asarray(result.get("final_phosphene"))
     frames = result.get("frames") or []
@@ -617,15 +646,33 @@ if "pv_result" in st.session_state:
     with col2:
         with st.container(border=True):
             st.markdown(
-                '<div class="pv-panel-title"><span class="pv-badge">2</span>V1 target response</div>',
+                '<div class="pv-panel-title"><span class="pv-badge">2</span>V1 response on the brain</div>',
                 unsafe_allow_html=True,
             )
             st.markdown(
-                '<div class="pv-panel-caption">Predicted V1 activity, reshaped into a '
-                "compact heatmap strip (illustrative, see caveats above).</div>",
+                '<div class="pv-panel-caption">Predicted V1 activity placed back onto '
+                f"subject {meta['subject']}'s real anatomy (NSD T1, native func1pt8mm "
+                "space) — color = predicted response where a V1 voxel exists on this "
+                "slice, grayscale = anatomy elsewhere. Illustrative, see caveats above.</div>",
                 unsafe_allow_html=True,
             )
-            st.image(render_vector_heatmap(v1_target_np), use_container_width=True)
+            brain = st.session_state.get("pv_brain")
+            v1_volume = st.session_state.get("pv_v1_volume")
+            if brain is not None and v1_volume is not None:
+                axis_label = st.radio(
+                    "View", list(AXIS_OPTIONS.keys()), index=2, horizontal=True, key="pv_axis_label",
+                )
+                axis = AXIS_OPTIONS[axis_label]
+                max_idx = brain["shape"][axis] - 1
+                slice_idx = st.slider(
+                    "Slice", min_value=0, max_value=max_idx, value=max_idx // 2, key=f"pv_slice_{axis_label}",
+                )
+                st.image(
+                    render_brain_slice(brain["t1"], v1_volume, axis, slice_idx),
+                    use_container_width=True,
+                )
+            else:
+                st.info("Run the pipeline to see this.")
 
     with col3:
         with st.container(border=True):

@@ -321,22 +321,29 @@ def _download_roi(subject_num: int) -> Path:
 
 
 @functools.lru_cache(maxsize=None)
-def load_v1_weights(subject: str, model_variant: str) -> Tuple[np.ndarray, int]:
-    """Download (if needed) the frozen NSD ridge-regression weights for
-    `subject`/`model_variant`, restrict them to V1 voxels (labels 1=V1v,
-    2=V1d in the NSD prf-visualrois atlas), and return
-    (v1_weight_matrix [1201, n_v1], n_v1_voxels).
-    """
-    # Lazily import nibabel here so a missing/optional dependency doesn't
-    # break importing the rest of this module.
-    import nibabel as nib
-
+def _load_nsd_fit(subject: str, model_variant: str) -> dict:
+    """Download (if needed) and load the raw NSD ridge-regression fit dict
+    for `subject`/`model_variant` (keys include `weights`, `voxel_index`,
+    `brain_nii_shape` -- see module docstring history / README)."""
     filename = _find_nsd_file(subject, model_variant)
     local_path = hf_hub_download(repo_id=NSD_REPO, filename=filename, local_dir=str(ASSETS_CACHE))
+    return np.load(local_path, allow_pickle=True).item()
 
-    d = np.load(local_path, allow_pickle=True).item()
-    weights = d["weights"]  # (1201, n_voxels) float64
+
+@functools.lru_cache(maxsize=None)
+def _v1_index_info(subject: str, model_variant: str) -> Tuple[np.ndarray, np.ndarray, Tuple[int, int, int]]:
+    """Cross-reference the fit's flat voxel indices against the NSD visual-ROI
+    atlas (labels 1=V1v, 2=V1d) to find which fitted voxels are V1.
+
+    Returns (voxel_index [n_fitted,] flat C-order indices into the subject's
+    (X,Y,Z) volume, v1_row_idx [n_v1,] positions *within* voxel_index/weight
+    columns that are V1, brain_nii_shape (X,Y,Z)).
+    """
+    import nibabel as nib  # lazy import: optional dependency, only needed here
+
+    d = _load_nsd_fit(subject, model_variant)
     voxel_index = np.asarray(d["voxel_index"][0])  # flat C-order indices, (n_voxels,)
+    brain_nii_shape = tuple(int(x) for x in d["brain_nii_shape"])
 
     subject_num = int(subject[1:])
     roi_path = _download_roi(subject_num)
@@ -345,11 +352,72 @@ def load_v1_weights(subject: str, model_variant: str) -> Tuple[np.ndarray, int]:
 
     fitted_labels = roi_flat[voxel_index]
     v1_row_idx = np.where(np.isin(fitted_labels, [1, 2]))[0]  # V1v, V1d
+    return voxel_index, v1_row_idx, brain_nii_shape
+
+
+@functools.lru_cache(maxsize=None)
+def load_v1_weights(subject: str, model_variant: str) -> Tuple[np.ndarray, int]:
+    """Restrict the frozen NSD ridge-regression weights for `subject`/
+    `model_variant` to V1 voxels and return
+    (v1_weight_matrix [1201, n_v1], n_v1_voxels).
+    """
+    d = _load_nsd_fit(subject, model_variant)
+    weights = d["weights"]  # (1201, n_voxels) float64
+    _, v1_row_idx, _ = _v1_index_info(subject, model_variant)
     if v1_row_idx.size == 0:
         raise RuntimeError(f"No V1 voxels found for subject={subject!r}, model_variant={model_variant!r}")
 
     v1_weights = weights[:, v1_row_idx].astype(np.float32)
     return v1_weights, int(v1_row_idx.size)
+
+
+def _download_t1(subject_num: int) -> Path:
+    cache_path = ASSETS_CACHE / f"T1_subj{subject_num:02d}.nii.gz"
+    if cache_path.exists() and cache_path.stat().st_size > 0:
+        return cache_path
+    url = (
+        f"https://natural-scenes-dataset.s3.amazonaws.com/nsddata/ppdata/"
+        f"subj{subject_num:02d}/func1pt8mm/T1_to_func1pt8mm.nii.gz"
+    )
+    resp = requests.get(url, timeout=60)
+    resp.raise_for_status()
+    cache_path.write_bytes(resp.content)
+    return cache_path
+
+
+@functools.lru_cache(maxsize=None)
+def load_brain_volumes(subject: str) -> Dict[str, np.ndarray]:
+    """Real anatomical context for spatial visualization: a T1 anatomical
+    volume and the NSD visual-ROI atlas, both already resampled by NSD into
+    the subject's native func1pt8mm space -- the same voxel grid the
+    ridge-regression fit and `v1_response_to_volume` use, so no further
+    registration is needed. Returns {"t1", "roi" (both (X,Y,Z) arrays),
+    "shape"}.
+    """
+    import nibabel as nib
+
+    subject_num = int(subject[1:])
+    t1_path = _download_t1(subject_num)
+    roi_path = _download_roi(subject_num)
+    t1 = np.asarray(nib.load(str(t1_path)).get_fdata(), dtype=np.float32)
+    roi = np.asarray(nib.load(str(roi_path)).get_fdata(), dtype=np.int16)
+    return {"t1": t1, "roi": roi, "shape": t1.shape}
+
+
+def v1_response_to_volume(subject: str, model_variant: str, v1_values: np.ndarray) -> np.ndarray:
+    """Place a (n_v1,) vector -- in the same voxel order `load_v1_weights`/
+    `extract_v1_target` use -- back into a full (X,Y,Z) volume in the
+    subject's native func1pt8mm space, so it can be viewed as real brain
+    slices. Voxels outside V1 are NaN.
+    """
+    voxel_index, v1_row_idx, brain_nii_shape = _v1_index_info(subject, model_variant)
+    v1_values = np.asarray(v1_values).reshape(-1)
+    if v1_values.size != v1_row_idx.size:
+        raise ValueError(f"Expected {v1_row_idx.size} V1 values for subject={subject!r}, got {v1_values.size}")
+
+    flat = np.full(int(np.prod(brain_nii_shape)), np.nan, dtype=np.float32)
+    flat[voxel_index[v1_row_idx]] = v1_values.astype(np.float32)
+    return flat.reshape(brain_nii_shape, order="C")
 
 
 # ==============================================================================
