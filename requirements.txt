@@ -1,0 +1,13 @@
+streamlit
+torch
+torchvision
+numpy
+nibabel
+huggingface_hub
+dynaphos
+pillow
+requests
+pyyaml
+matplotlib
+scipy
+opencv-python-headless
