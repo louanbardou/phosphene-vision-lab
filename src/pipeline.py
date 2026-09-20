@@ -44,7 +44,8 @@ from dynaphos.utils import load_params
 # Paths / constants
 # ==============================================================================
 BASE_DIR = Path(__file__).resolve().parent
-ASSETS_CACHE = BASE_DIR / "assets_cache"
+REPO_ROOT = BASE_DIR.parent
+ASSETS_CACHE = REPO_ROOT / "assets_cache"
 ASSETS_CACHE.mkdir(parents=True, exist_ok=True)
 (ASSETS_CACHE / ".gitignore").write_text("*\n!.gitignore\n")
 

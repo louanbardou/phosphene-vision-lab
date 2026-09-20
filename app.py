@@ -20,7 +20,7 @@ from PIL import Image, ImageDraw, ImageFont
 # present yet / not finished — no fake pipeline logic is stubbed in here).
 # --------------------------------------------------------------------------
 try:
-    from pipeline import (
+    from src.pipeline import (
         SUBJECTS,
         MODEL_VARIANTS,
         load_backbone,
@@ -422,14 +422,15 @@ if "pv_result" not in st.session_state:
         <div class="pv-header">
             <h1>Phosphene Vision Pipeline</h1>
             <p>
-                Turns a single photo into a simulated cortical-prosthesis percept:
-                a frozen self-supervised CNN extracts features, a frozen NSD
-                ridge-regression fit predicts a target V1 response, a gradient-based
-                optimizer searches for the electrode stimulation pattern that best
-                reproduces that response, and a differentiable phosphene simulator
-                (dynaphos) renders what the resulting percept might look like.
+                Turns a photo into what a blind person with a brain implant (a
+                "visual prosthesis") might see. Step 1: an AI model looks at the
+                photo. Step 2: another model guesses how the brain's vision area
+                would react to it. Step 3: a computer searches for the electrical
+                pattern that would create that same brain reaction. Step 4: a
+                simulator shows what that pattern would actually look like as a
+                pattern of light spots.
             </p>
-            <span class="pv-tag">real weights · real optimization · not real-time</span>
+            <span class="pv-tag">real data · real computation · not real-time</span>
         </div>
         """,
         unsafe_allow_html=True,
@@ -437,11 +438,11 @@ if "pv_result" not in st.session_state:
 
     # Step-flow strip (static, explanatory — CNN-Explainer-style panel-per-stage)
     _flow_steps = [
-        ("1", "Input photo", "A snapshot or uploaded image."),
-        ("2", "Frozen CNN", "SimCLR ResNet18 features, weights untouched."),
-        ("3", "V1 encoding", "Per-subject NSD ridge-regression fit predicts a target V1 response."),
-        ("4", "Optimize stimulation", "Gradient descent searches for an electrode pattern matching that target."),
-        ("5", "Phosphene simulator", "dynaphos renders the resulting simulated percept — the pattern of light the wearer would subjectively see."),
+        ("1", "Your photo", "An image you upload."),
+        ("2", "AI looks at it", "A pretrained image-recognition model reads the photo."),
+        ("3", "Guess the brain reaction", "Predicts how the brain's vision area would react to it."),
+        ("4", "Find the pattern", "Searches for the electrical pattern that causes that same reaction."),
+        ("5", "Show the result", "Simulates what that pattern would look like to the person."),
     ]
     _flow_html = ['<div class="pv-flow">']
     for i, (num, title, desc) in enumerate(_flow_steps):
@@ -474,28 +475,28 @@ if raw_file is not None:
         st.sidebar.error(f"Could not read image: {exc}")
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### Subject & model")
-subject = st.sidebar.selectbox("Subject (NSD ridge-regression fit)", SUBJECTS, index=0)
+st.sidebar.markdown("### Whose brain data to use")
+subject = st.sidebar.selectbox("Person (1 of 8 real brain scans)", SUBJECTS, index=0)
 _default_model_idx = (
     MODEL_VARIANTS.index("VEDB Baseline") if "VEDB Baseline" in MODEL_VARIANTS else 0
 )
 model_variant = st.sidebar.selectbox(
-    "Backbone / model variant", MODEL_VARIANTS, index=_default_model_idx
+    "AI model version", MODEL_VARIANTS, index=_default_model_idx
 )
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### Electrode array")
-n_electrodes_side = st.sidebar.slider("Electrodes per side", min_value=5, max_value=25, value=15, step=1)
+st.sidebar.markdown("### Implant settings")
+n_electrodes_side = st.sidebar.slider("Number of electrodes (grid size)", min_value=5, max_value=25, value=15, step=1)
 dropout = st.sidebar.slider(
-    "Simulated electrode dropout", min_value=0.0, max_value=0.5, value=0.2, step=0.01,
-    help="Fraction of electrodes assumed non-functional / dropped out.",
+    "Broken electrodes", min_value=0.0, max_value=0.5, value=0.2, step=0.01,
+    help="Share of electrodes assumed not working.",
 )
 jitter = st.sidebar.slider(
-    "Electrode position jitter", min_value=0.0, max_value=1.0, value=0.4, step=0.01,
-    help="Random displacement applied to each electrode's assumed cortical position.",
+    "Electrode placement error", min_value=0.0, max_value=1.0, value=0.4, step=0.01,
+    help="How far each electrode is placed from its ideal spot.",
 )
 
-st.sidebar.caption("Electrode grid preview")
+st.sidebar.caption("What the electrode grid looks like")
 st.sidebar.image(
     render_electrode_grid_preview(n_electrodes_side, dropout, jitter),
     use_container_width=False,
@@ -503,12 +504,12 @@ st.sidebar.image(
 )
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### Optimization")
-n_steps = st.sidebar.slider("Optimization steps", min_value=10, max_value=300, value=120, step=10)
+st.sidebar.markdown("### How long to search")
+n_steps = st.sidebar.slider("Number of tries", min_value=10, max_value=300, value=120, step=10)
 
 st.sidebar.markdown("---")
 run_clicked = st.sidebar.button(
-    "Optimize stimulation pattern", type="primary", use_container_width=True
+    "Run", type="primary", use_container_width=True
 )
 
 
@@ -522,24 +523,24 @@ if run_clicked:
         st.error(f"Cannot run: pipeline.py is unavailable ({PIPELINE_IMPORT_ERROR}).")
     else:
         try:
-            with st.spinner(f"Loading {model_variant} backbone..."):
+            with st.spinner(f"Loading the {model_variant} AI model..."):
                 backbone = cached_load_backbone(model_variant)
 
-            with st.spinner(f"Loading NSD V1 ridge-regression weights for subject {subject}..."):
+            with st.spinner(f"Loading brain data for person {subject}..."):
                 v1_weights, n_v1_voxels = cached_load_v1_weights(subject, model_variant)
 
-            with st.spinner("Extracting frozen-CNN features and predicting the V1 target response..."):
+            with st.spinner("Guessing how the brain would react to your photo..."):
                 image_tensor = preprocess_image(input_image)
                 v1_target = extract_v1_target(backbone, v1_weights, image_tensor)
 
-            with st.spinner(f"Loading subject {subject}'s real anatomical brain volume..."):
+            with st.spinner(f"Loading person {subject}'s brain scan..."):
                 brain = cached_load_brain_volumes(subject)
                 v1_volume = v1_response_to_volume(subject, model_variant, to_numpy(v1_target))
 
-            with st.spinner("Building the cortical phosphene simulator..."):
+            with st.spinner("Setting up the implant simulator..."):
                 simulator, sim_params = build_simulator(n_electrodes_side, dropout, jitter)
 
-            progress_bar = st.progress(0, text="Optimizing stimulation pattern...")
+            progress_bar = st.progress(0, text="Searching for the best electrical pattern...")
 
             def _progress_cb(*args, **kwargs):
                 step = kwargs.get("step", args[0] if len(args) > 0 else None)
@@ -629,7 +630,7 @@ if "pv_result" in st.session_state:
                 unsafe_allow_html=True,
             )
             st.markdown(
-                '<div class="pv-panel-caption">The photo fed into the frozen CNN.</div>',
+                '<div class="pv-panel-caption">The photo the AI model looked at.</div>',
                 unsafe_allow_html=True,
             )
             st.image(result_image, use_container_width=True)
@@ -637,14 +638,13 @@ if "pv_result" in st.session_state:
     with col2:
         with st.container(border=True, height=PANEL_HEIGHT):
             st.markdown(
-                '<div class="pv-panel-title"><span class="pv-badge">2</span>V1 response on the brain</div>',
+                '<div class="pv-panel-title"><span class="pv-badge">2</span>Brain reaction</div>',
                 unsafe_allow_html=True,
             )
             st.markdown(
-                '<div class="pv-panel-caption">Predicted V1 activity placed back onto '
-                f"subject {meta['subject']}'s real anatomy (NSD T1, native func1pt8mm "
-                "space) — color = predicted response where a V1 voxel exists on this "
-                "slice, grayscale = anatomy elsewhere.</div>",
+                '<div class="pv-panel-caption">Where in person '
+                f"{meta['subject']}'s brain the vision area sits, and how strongly it's "
+                "predicted to react. Color = predicted reaction, gray = the rest of the brain.</div>",
                 unsafe_allow_html=True,
             )
             brain = st.session_state.get("pv_brain")
@@ -663,17 +663,16 @@ if "pv_result" in st.session_state:
                     use_container_width=True,
                 )
             else:
-                st.info("Run the pipeline to see this.")
+                st.info("Run it to see this.")
 
     with col3:
         with st.container(border=True, height=PANEL_HEIGHT):
             st.markdown(
-                '<div class="pv-panel-title"><span class="pv-badge">3</span>Simulated percept</div>',
+                '<div class="pv-panel-title"><span class="pv-badge">3</span>What the person would see</div>',
                 unsafe_allow_html=True,
             )
             st.markdown(
-                '<div class="pv-panel-caption">Final phosphene pattern from the dynaphos '
-                "simulator after optimization, anchored in degrees of visual angle.</div>",
+                '<div class="pv-panel-caption">The best light-spot pattern found.</div>',
                 unsafe_allow_html=True,
             )
             st.image(render_phosphene_with_axes(final_phosphene, sim_params), use_container_width=True)
@@ -681,12 +680,11 @@ if "pv_result" in st.session_state:
     with col4:
         with st.container(border=True, height=PANEL_HEIGHT):
             st.markdown(
-                '<div class="pv-panel-title"><span class="pv-badge">4</span>Optimization scrubber</div>',
+                '<div class="pv-panel-title"><span class="pv-badge">4</span>Watch it improve</div>',
                 unsafe_allow_html=True,
             )
             st.markdown(
-                '<div class="pv-panel-caption">Step through intermediate snapshots to see the '
-                "percept sharpen.</div>",
+                '<div class="pv-panel-caption">Drag to see the pattern get better try by try.</div>',
                 unsafe_allow_html=True,
             )
             if frames:
@@ -694,7 +692,7 @@ if "pv_result" in st.session_state:
                     "Frame",
                     options=list(range(len(frames))),
                     value=len(frames) - 1,
-                    format_func=lambda i: f"step {i + 1}/{len(frames)}",
+                    format_func=lambda i: f"try {i + 1}/{len(frames)}",
                     label_visibility="collapsed",
                 )
                 st.image(
@@ -702,18 +700,18 @@ if "pv_result" in st.session_state:
                     use_container_width=True,
                 )
             else:
-                st.info("No intermediate frames were returned by the optimizer.")
+                st.info("No in-between results were saved.")
 
-    st.markdown("#### Optimization loss")
+    st.markdown("#### How the search improved over time")
     if loss_trace:
         st.line_chart(loss_trace)
         st.markdown(
-            '<div class="pv-footnote">Loss between the simulator\'s predicted V1 response '
-            "for the current stimulation pattern and the target V1 response, per step.</div>",
+            '<div class="pv-footnote">Lower = the electrical pattern gets closer to '
+            "the predicted brain reaction, try after try.</div>",
             unsafe_allow_html=True,
         )
     else:
-        st.info("No loss trace was returned by the optimizer.")
+        st.info("No progress data was saved.")
 
 else:
     st.info(

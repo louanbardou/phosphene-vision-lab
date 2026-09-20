@@ -1,20 +1,24 @@
 # Phosphene Vision Lab
 
-Final project for Tooling for the Data Scientist. Turns a photo into a simulated view of what a cortical visual prosthesis wearer might see.
+Final project for Tooling for the Data Scientist.
 
-## Pipeline
+This app shows what a blind person with a brain implant (a "visual prosthesis") might see when looking at a photo. You upload a photo, and it simulates the pattern of light spots ("phosphenes") that person's brain implant would probably produce.
 
-1. Photo → frozen SimCLR ResNet18 (`DM-Diaz/VEDB-SimCLR-ResNet18-Baseline` on HuggingFace).
-2. Features → frozen NSD ridge-regression weights (`DM-Diaz/VEDB-NSD-ResNet18-Encoding-Models`), kept to V1 voxels only using NSD's public ROI masks.
-3. Gradient descent on the stimulation pattern only (nothing gets trained) to match that V1 target.
-4. Rendered through [`dynaphos`](https://github.com/neuralcodinglab/dynaphos), a real phosphene simulator. The output is the "percept" — what the prosthesis wearer would subjectively see, not a brain scan.
+## How it works (simple version)
 
-## Limitations
+1. An AI model trained to recognize images looks at your photo.
+2. Another model, trained on real brain-scan data, guesses how a person's brain would react to it.
+3. A search program tries many electrical patterns until it finds one that would cause a similar brain reaction.
+4. A simulator shows what that pattern would look like as spots of light — this is the "percept", what the person would actually see.
 
-- No public PCA basis for the feature reduction step → replaced with a fixed random projection. V1 target = illustrative, not the paper's exact numbers.
-- Ridge weights are fit per subject (S1-S8), not "your" brain.
-- Electrode grid is assumed (regular grid), not a real implant layout.
-- Runs on CPU in a few seconds per photo, not live video.
+Nothing here is trained by us — every model is a public, pretrained one. Only step 3 does any real computing (searching for the best pattern).
+
+## Good to know
+
+- One step (turning image features into a smaller set of numbers) is missing its original recipe, so we use a simple substitute. The "brain reaction" shown is a rough illustration, not an exact match to the original research.
+- The brain data comes from one of 8 real people (S1-S8) who took part in a real study — it's not "your" brain.
+- The electrode positions are a made-up regular grid, not a real implant.
+- It takes a few seconds per photo on a normal computer (CPU), not real-time video.
 
 ## Run it
 
@@ -29,12 +33,14 @@ First run downloads the model/data files (~250MB, public, no login needed).
 
 ## Tests
 
-Unit tests cover the data import/filtering functions (picking the right weight file, filtering V1 voxels, placing values back in the brain volume) with small fake inputs — no network calls, so they're fast and don't break in CI.
+Unit tests check the functions that pick/filter the data (picking the right file, keeping only the right brain region, placing values back in the right spot). They use small fake inputs, not the real downloads, so they run fast and don't need internet.
 
 ```bash
 pip install -r requirements-dev.txt
-pytest tests/ -v
+pytest tests/ -v --cov=src.pipeline --cov-report=term-missing
 ```
+
+Coverage is around 30% of `src/pipeline.py`. The untested part is mostly the download/model-loading code (needs internet + real files), checked by hand with the smoke test in that file instead.
 
 ## CI
 

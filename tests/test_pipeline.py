@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-import pipeline as p
+from src import pipeline as p
 
 
 # --------------------------------------------------------------------------

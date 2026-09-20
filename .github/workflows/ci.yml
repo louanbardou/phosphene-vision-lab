@@ -21,8 +21,8 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
 
-      - name: Run tests
-        run: pytest tests/ -v
+      - name: Run tests with coverage
+        run: pytest tests/ -v --cov=src.pipeline --cov-report=term-missing
 
   docker-build:
     runs-on: ubuntu-latest

@@ -11,8 +11,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY pipeline.py app.py ./
-COPY config/ ./config/
+COPY app.py ./
+COPY src/ ./src/
 
 EXPOSE 8501
 
