@@ -114,9 +114,9 @@ st.markdown(
         font-family: 'JetBrains Mono', monospace;
         font-size: 0.72rem;
         letter-spacing: 0.04em;
-        color: #8fd6c4;
-        background: rgba(94, 201, 170, 0.10);
-        border: 1px solid rgba(94, 201, 170, 0.30);
+        color: #9db4ff;
+        background: rgba(76, 125, 255, 0.10);
+        border: 1px solid rgba(76, 125, 255, 0.30);
         border-radius: 999px;
         padding: 0.28rem 0.7rem;
     }
@@ -144,7 +144,7 @@ st.markdown(
         width: 22px;
         height: 22px;
         border-radius: 50%;
-        background: #5ec9aa;
+        background: #4C7DFF;
         color: #0a0c10;
         font-weight: 700;
         font-size: 0.75rem;
@@ -171,30 +171,6 @@ st.markdown(
         padding: 0 0.1rem;
     }
 
-    /* Caveats callout */
-    .pv-caveat-box {
-        border-left: 3px solid #d9a441;
-        background: rgba(217, 164, 65, 0.07);
-        border-radius: 0 10px 10px 0;
-        padding: 0.9rem 1.1rem;
-        margin-bottom: 0.4rem;
-    }
-    .pv-caveat-box h4 {
-        margin: 0 0 0.3rem 0;
-        color: #e8c47c;
-        font-size: 0.92rem;
-        font-weight: 700;
-    }
-    .pv-caveat-box p, .pv-caveat-box li {
-        color: #c7cbd6;
-        font-size: 0.87rem;
-        line-height: 1.55;
-    }
-    .pv-caveat-box ol {
-        margin: 0.3rem 0 0.2rem 1.1rem;
-        padding: 0;
-    }
-
     /* Panel headers inside result cards */
     .pv-panel-title {
         font-weight: 700;
@@ -215,8 +191,8 @@ st.markdown(
         width: 20px;
         height: 20px;
         border-radius: 6px;
-        background: rgba(94, 201, 170, 0.18);
-        color: #5ec9aa;
+        background: rgba(76, 125, 255, 0.18);
+        color: #9db4ff;
         font-weight: 700;
         font-size: 0.72rem;
         margin-right: 0.4rem;
@@ -233,6 +209,8 @@ st.markdown(
         color: #6b7284;
         margin-top: 0.3rem;
     }
+
+    #MainMenu, footer {visibility: hidden;}
     </style>
     """,
     unsafe_allow_html=True,
@@ -378,7 +356,7 @@ def render_phosphene_with_axes(
     ox_px = margin_l + ox_frac * (img_w - 1)
     oy_px = margin_t + img_h - oy_frac * (img_h - 1)
     r = 4
-    cross_color = (217, 164, 65)
+    cross_color = (76, 125, 255)
     draw.line([(ox_px - r, oy_px), (ox_px + r, oy_px)], fill=cross_color, width=1)
     draw.line([(ox_px, oy_px - r), (ox_px, oy_px + r)], fill=cross_color, width=1)
 
@@ -421,31 +399,10 @@ def render_electrode_grid_preview(
                 continue
             x = margin + j * spacing + rng.uniform(-max_jitter_px, max_jitter_px)
             y = margin + i * spacing + rng.uniform(-max_jitter_px, max_jitter_px)
-            draw.ellipse([x - dot_r, y - dot_r, x + dot_r, y + dot_r], fill=(94, 201, 170))
+            draw.ellipse([x - dot_r, y - dot_r, x + dot_r, y + dot_r], fill=(76, 125, 255))
 
     return canvas
 
-
-# ==========================================================================
-# Header
-# ==========================================================================
-st.markdown(
-    """
-    <div class="pv-header">
-        <h1>Phosphene Vision Pipeline</h1>
-        <p>
-            Turns a single photo into a simulated cortical-prosthesis percept:
-            a frozen self-supervised CNN extracts features, a frozen NSD
-            ridge-regression fit predicts a target V1 response, a gradient-based
-            optimizer searches for the electrode stimulation pattern that best
-            reproduces that response, and a differentiable phosphene simulator
-            (dynaphos) renders what the resulting percept might look like.
-        </p>
-        <span class="pv-tag">real weights · real optimization · not real-time</span>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
 
 if not PIPELINE_AVAILABLE:
     st.error(
@@ -454,85 +411,67 @@ if not PIPELINE_AVAILABLE:
         "so layout/styling can be reviewed independently."
     )
 
-# Step-flow strip (static, explanatory — CNN-Explainer-style panel-per-stage)
-_flow_steps = [
-    ("1", "Input photo", "A snapshot or uploaded image."),
-    ("2", "Frozen CNN", "SimCLR ResNet18 features, weights untouched."),
-    ("3", "V1 encoding", "Per-subject NSD ridge-regression fit predicts a target V1 response."),
-    ("4", "Optimize stimulation", "Gradient descent searches for an electrode pattern matching that target."),
-    ("5", "Phosphene simulator", "dynaphos renders the resulting simulated percept."),
-]
-_flow_html = ['<div class="pv-flow">']
-for i, (num, title, desc) in enumerate(_flow_steps):
-    _flow_html.append(
-        f'<div class="pv-flow-step"><span class="pv-flow-num">{num}</span>'
-        f'<div class="pv-flow-title">{title}</div>'
-        f'<div class="pv-flow-desc">{desc}</div></div>'
-    )
-    if i < len(_flow_steps) - 1:
-        _flow_html.append('<div class="pv-flow-arrow">&#8594;</div>')
-_flow_html.append("</div>")
-st.markdown("".join(_flow_html), unsafe_allow_html=True)
-
-
-# ==========================================================================
-# Caveats — permanent, visible, open by default
-# ==========================================================================
-with st.expander("Read before you trust this", expanded=True):
+# Header + step-flow strip only shown before a result exists — once you've
+# run the pipeline, the results panel below is the point, not the intro.
+if "pv_result" not in st.session_state:
+    # ----------------------------------------------------------------------
+    # Header
+    # ----------------------------------------------------------------------
     st.markdown(
         """
-        <div class="pv-caveat-box">
-        <h4>Three simplifications made in this demo</h4>
-        <ol>
-        <li><b>Feature reduction is substituted.</b> The published PCA step used
-        by the original NSD encoding-model authors to reduce CNN features before
-        ridge regression is not publicly distributed. This demo substitutes a
-        fixed random projection in its place. Treat the "V1 target response"
-        panel as illustrative of the pipeline mechanism, not a faithful
-        reproduction of the paper's exact voxel predictions.</li>
-        <li><b>Subject weights are not yours.</b> The NSD ridge-regression
-        weights are fit per subject (S1&ndash;S8) on brain data collected from
-        that specific person. Applying them to an arbitrary photo of your own
-        choosing is an approximation of the pipeline mechanism, not a
-        personalized reading of your own visual cortex.</li>
-        <li><b>The electrode grid is assumed, not measured.</b> The electrode
-        layout is a regular grid placed over a cortical map as a modeling
-        convenience, not a real or measured electrode placement from any
-        implant.</li>
-        </ol>
+        <div class="pv-header">
+            <h1>Phosphene Vision Pipeline</h1>
+            <p>
+                Turns a single photo into a simulated cortical-prosthesis percept:
+                a frozen self-supervised CNN extracts features, a frozen NSD
+                ridge-regression fit predicts a target V1 response, a gradient-based
+                optimizer searches for the electrode stimulation pattern that best
+                reproduces that response, and a differentiable phosphene simulator
+                (dynaphos) renders what the resulting percept might look like.
+            </p>
+            <span class="pv-tag">real weights · real optimization · not real-time</span>
         </div>
         """,
         unsafe_allow_html=True,
     )
+
+    # Step-flow strip (static, explanatory — CNN-Explainer-style panel-per-stage)
+    _flow_steps = [
+        ("1", "Input photo", "A snapshot or uploaded image."),
+        ("2", "Frozen CNN", "SimCLR ResNet18 features, weights untouched."),
+        ("3", "V1 encoding", "Per-subject NSD ridge-regression fit predicts a target V1 response."),
+        ("4", "Optimize stimulation", "Gradient descent searches for an electrode pattern matching that target."),
+        ("5", "Phosphene simulator", "dynaphos renders the resulting simulated percept — the pattern of light the wearer would subjectively see."),
+    ]
+    _flow_html = ['<div class="pv-flow">']
+    for i, (num, title, desc) in enumerate(_flow_steps):
+        _flow_html.append(
+            f'<div class="pv-flow-step"><span class="pv-flow-num">{num}</span>'
+            f'<div class="pv-flow-title">{title}</div>'
+            f'<div class="pv-flow-desc">{desc}</div></div>'
+        )
+        if i < len(_flow_steps) - 1:
+            _flow_html.append('<div class="pv-flow-arrow">&#8594;</div>')
+    _flow_html.append("</div>")
+    st.markdown("".join(_flow_html), unsafe_allow_html=True)
+
 
 
 # ==========================================================================
 # Sidebar controls
 # ==========================================================================
 st.sidebar.markdown("### Input image")
-image_source = st.sidebar.radio(
-    "Image source", ["Upload a photo", "Camera snapshot"], index=0, label_visibility="collapsed"
+uploaded_file = st.sidebar.file_uploader(
+    "Upload an image", type=["jpg", "jpeg", "png"], label_visibility="collapsed"
 )
 
-uploaded_file = None
-camera_file = None
-if image_source == "Upload a photo":
-    uploaded_file = st.sidebar.file_uploader(
-        "Upload an image", type=["jpg", "jpeg", "png"], label_visibility="collapsed"
-    )
-else:
-    camera_file = st.sidebar.camera_input("Take a snapshot", label_visibility="collapsed")
-
-raw_file = uploaded_file if uploaded_file is not None else camera_file
+raw_file = uploaded_file
 input_image = None
 if raw_file is not None:
     try:
         input_image = Image.open(raw_file).convert("RGB")
     except Exception as exc:
         st.sidebar.error(f"Could not read image: {exc}")
-
-if input_image is not None:
-    st.sidebar.image(input_image, caption="Selected input", use_container_width=True)
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### Subject & model")
@@ -556,7 +495,7 @@ jitter = st.sidebar.slider(
     help="Random displacement applied to each electrode's assumed cortical position.",
 )
 
-st.sidebar.caption("Assumed electrode grid preview (schematic, not a measured implant)")
+st.sidebar.caption("Electrode grid preview")
 st.sidebar.image(
     render_electrode_grid_preview(n_electrodes_side, dropout, jitter),
     use_container_width=False,
@@ -565,15 +504,11 @@ st.sidebar.image(
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### Optimization")
-n_steps = st.sidebar.slider("Optimization steps", min_value=10, max_value=60, value=30, step=1)
+n_steps = st.sidebar.slider("Optimization steps", min_value=10, max_value=300, value=120, step=10)
 
 st.sidebar.markdown("---")
 run_clicked = st.sidebar.button(
     "Optimize stimulation pattern", type="primary", use_container_width=True
-)
-st.sidebar.caption(
-    "Runs the full pipeline on click (a few seconds on CPU). Sliders don't "
-    "auto-rerun the optimization."
 )
 
 
@@ -582,7 +517,7 @@ st.sidebar.caption(
 # ==========================================================================
 if run_clicked:
     if input_image is None:
-        st.sidebar.error("Provide an image via upload or camera snapshot first.")
+        st.sidebar.error("Upload an image first.")
     elif not PIPELINE_AVAILABLE:
         st.error(f"Cannot run: pipeline.py is unavailable ({PIPELINE_IMPORT_ERROR}).")
     else:
@@ -635,7 +570,7 @@ if run_clicked:
                 simulator,
                 sim_params,
                 n_steps=n_steps,
-                lr=1e-5,
+                lr=3e-4,
                 progress_callback=_progress_cb,
             )
             progress_bar.progress(1.0, text="Optimization complete.")
@@ -679,15 +614,16 @@ if "pv_result" in st.session_state:
     st.markdown("## Pipeline output")
     st.caption(
         f"Subject {meta['subject']} · {meta['model_variant']} · "
-        f"{meta['n_electrodes_side']}×{meta['n_electrodes_side']} electrode grid "
-        f"(dropout {meta['dropout']:.2f}, jitter {meta['jitter']:.2f}) · "
+        f"{meta['n_electrodes_side']}×{meta['n_electrodes_side']} electrode grid · "
+        f"dropout {meta['dropout']:.2f} · jitter {meta['jitter']:.2f} · "
         f"{meta['n_steps']} optimization steps · {meta['n_v1_voxels']} V1 voxels"
     )
 
     col1, col2, col3, col4 = st.columns(4)
+    PANEL_HEIGHT = 620
 
     with col1:
-        with st.container(border=True):
+        with st.container(border=True, height=PANEL_HEIGHT):
             st.markdown(
                 '<div class="pv-panel-title"><span class="pv-badge">1</span>Input photo</div>',
                 unsafe_allow_html=True,
@@ -699,7 +635,7 @@ if "pv_result" in st.session_state:
             st.image(result_image, use_container_width=True)
 
     with col2:
-        with st.container(border=True):
+        with st.container(border=True, height=PANEL_HEIGHT):
             st.markdown(
                 '<div class="pv-panel-title"><span class="pv-badge">2</span>V1 response on the brain</div>',
                 unsafe_allow_html=True,
@@ -708,7 +644,7 @@ if "pv_result" in st.session_state:
                 '<div class="pv-panel-caption">Predicted V1 activity placed back onto '
                 f"subject {meta['subject']}'s real anatomy (NSD T1, native func1pt8mm "
                 "space) — color = predicted response where a V1 voxel exists on this "
-                "slice, grayscale = anatomy elsewhere. Illustrative, see caveats above.</div>",
+                "slice, grayscale = anatomy elsewhere.</div>",
                 unsafe_allow_html=True,
             )
             brain = st.session_state.get("pv_brain")
@@ -730,28 +666,27 @@ if "pv_result" in st.session_state:
                 st.info("Run the pipeline to see this.")
 
     with col3:
-        with st.container(border=True):
+        with st.container(border=True, height=PANEL_HEIGHT):
             st.markdown(
                 '<div class="pv-panel-title"><span class="pv-badge">3</span>Simulated percept</div>',
                 unsafe_allow_html=True,
             )
             st.markdown(
                 '<div class="pv-panel-caption">Final phosphene pattern from the dynaphos '
-                "simulator after optimization, anchored in degrees of visual angle "
-                "(dynaphos's own coordinate system).</div>",
+                "simulator after optimization, anchored in degrees of visual angle.</div>",
                 unsafe_allow_html=True,
             )
             st.image(render_phosphene_with_axes(final_phosphene, sim_params), use_container_width=True)
 
     with col4:
-        with st.container(border=True):
+        with st.container(border=True, height=PANEL_HEIGHT):
             st.markdown(
                 '<div class="pv-panel-title"><span class="pv-badge">4</span>Optimization scrubber</div>',
                 unsafe_allow_html=True,
             )
             st.markdown(
                 '<div class="pv-panel-caption">Step through intermediate snapshots to see the '
-                "percept sharpen (not live video — precomputed frames).</div>",
+                "percept sharpen.</div>",
                 unsafe_allow_html=True,
             )
             if frames:
@@ -782,7 +717,6 @@ if "pv_result" in st.session_state:
 
 else:
     st.info(
-        "Provide a photo in the sidebar (upload or camera snapshot), choose a subject "
-        "and model variant, then click **Optimize stimulation pattern** to run the "
-        "pipeline. It takes a few seconds on CPU — this is not a live video feed."
+        "Upload a photo in the sidebar, choose a subject and model variant, "
+        "then click **Optimize stimulation pattern** to run the pipeline."
     )

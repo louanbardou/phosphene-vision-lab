@@ -21,7 +21,8 @@ import sys
 import requests
 from huggingface_hub import hf_hub_download, list_repo_files
 
-ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets_cache")
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ASSETS_DIR = os.path.join(REPO_ROOT, "assets_cache")
 
 ENCODER_REPO = "DM-Diaz/VEDB-SimCLR-ResNet18-Baseline"
 RIDGE_REPO = "DM-Diaz/VEDB-NSD-ResNet18-Encoding-Models"

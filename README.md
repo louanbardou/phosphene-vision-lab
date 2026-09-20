@@ -7,7 +7,7 @@ Final project for Tooling for the Data Scientist. Turns a photo into a simulated
 1. Photo → frozen SimCLR ResNet18 (`DM-Diaz/VEDB-SimCLR-ResNet18-Baseline` on HuggingFace).
 2. Features → frozen NSD ridge-regression weights (`DM-Diaz/VEDB-NSD-ResNet18-Encoding-Models`), kept to V1 voxels only using NSD's public ROI masks.
 3. Gradient descent on the stimulation pattern only (nothing gets trained) to match that V1 target.
-4. Rendered through [`dynaphos`](https://github.com/neuralcodinglab/dynaphos), a real phosphene simulator.
+4. Rendered through [`dynaphos`](https://github.com/neuralcodinglab/dynaphos), a real phosphene simulator. The output is the "percept" — what the prosthesis wearer would subjectively see, not a brain scan.
 
 ## Limitations
 
@@ -48,7 +48,3 @@ docker run -p 8501:8501 phosphene-vision-lab
 ```
 
 Then open http://localhost:8501.
-
-## License
-
-`dynaphos` is GPL-3.0 (unmodified dependency). Rest of the code: MIT.
