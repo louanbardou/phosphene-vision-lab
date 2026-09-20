@@ -9,7 +9,7 @@ Final project for Tooling for the Data Scientist. Turns a photo into a simulated
 3. Gradient descent on the stimulation pattern only (nothing gets trained) to match that V1 target.
 4. Rendered through [`dynaphos`](https://github.com/neuralcodinglab/dynaphos), a real phosphene simulator.
 
-## Limitations (be honest, not everything here is exact)
+## Limitations
 
 - No public PCA basis for the feature reduction step → replaced with a fixed random projection. V1 target = illustrative, not the paper's exact numbers.
 - Ridge weights are fit per subject (S1-S8), not "your" brain.
