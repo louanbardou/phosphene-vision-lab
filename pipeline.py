@@ -292,18 +292,26 @@ def _nsd_repo_files() -> Tuple[str, ...]:
     return tuple(list_repo_files(NSD_REPO))
 
 
-def _find_nsd_file(subject: str, model_variant: str) -> str:
+def filter_nsd_files(files, subject: str, model_variant: str) -> str:
+    """Pick the one NSD encoding-model file matching `subject`/`model_variant`
+    out of a repo file listing. Pure filtering logic (no network) so it's
+    unit-testable against a fake file list -- see tests/test_pipeline.py.
+    """
     if model_variant not in NSD_VARIANT_DIRS:
         raise ValueError(f"Unknown model_variant {model_variant!r}. Options: {MODEL_VARIANTS}")
     dir_prefix = NSD_VARIANT_DIRS[model_variant]
     pattern = re.compile(rf"^{re.escape(dir_prefix)}/NSD_{re.escape(subject)}_.*_concat\.npy$")
-    matches = [f for f in _nsd_repo_files() if pattern.match(f)]
+    matches = [f for f in files if pattern.match(f)]
     if not matches:
         raise FileNotFoundError(
             f"No NSD encoding-model file found for subject={subject!r}, "
             f"model_variant={model_variant!r} (looked for {pattern.pattern!r} in {NSD_REPO})"
         )
     return matches[0]
+
+
+def _find_nsd_file(subject: str, model_variant: str) -> str:
+    return filter_nsd_files(_nsd_repo_files(), subject, model_variant)
 
 
 def _download_roi(subject_num: int) -> Path:
@@ -330,6 +338,16 @@ def _load_nsd_fit(subject: str, model_variant: str) -> dict:
     return np.load(local_path, allow_pickle=True).item()
 
 
+def filter_v1_rows(roi_flat: np.ndarray, voxel_index: np.ndarray, labels=(1, 2)) -> np.ndarray:
+    """Given a flattened ROI-atlas volume and the fit's flat voxel indices,
+    return the positions *within* voxel_index (i.e. weight-matrix columns)
+    whose ROI label is V1 (1=V1v, 2=V1d by default). Pure filtering logic
+    (no network/no files) so it's unit-testable -- see tests/test_pipeline.py.
+    """
+    fitted_labels = roi_flat[voxel_index]
+    return np.where(np.isin(fitted_labels, labels))[0]
+
+
 @functools.lru_cache(maxsize=None)
 def _v1_index_info(subject: str, model_variant: str) -> Tuple[np.ndarray, np.ndarray, Tuple[int, int, int]]:
     """Cross-reference the fit's flat voxel indices against the NSD visual-ROI
@@ -350,8 +368,7 @@ def _v1_index_info(subject: str, model_variant: str) -> Tuple[np.ndarray, np.nda
     roi = nib.load(str(roi_path)).get_fdata()
     roi_flat = roi.flatten(order="C")
 
-    fitted_labels = roi_flat[voxel_index]
-    v1_row_idx = np.where(np.isin(fitted_labels, [1, 2]))[0]  # V1v, V1d
+    v1_row_idx = filter_v1_rows(roi_flat, voxel_index)
     return voxel_index, v1_row_idx, brain_nii_shape
 
 
@@ -404,6 +421,23 @@ def load_brain_volumes(subject: str) -> Dict[str, np.ndarray]:
     return {"t1": t1, "roi": roi, "shape": t1.shape}
 
 
+def place_values_in_volume(
+    v1_values: np.ndarray, voxel_index: np.ndarray, v1_row_idx: np.ndarray, brain_nii_shape: Tuple[int, int, int]
+) -> np.ndarray:
+    """Scatter a (n_v1,) vector into a full (X,Y,Z) volume at the flat
+    positions `voxel_index[v1_row_idx]`, NaN everywhere else. Pure array
+    logic (no network/no files) so it's unit-testable -- see
+    tests/test_pipeline.py.
+    """
+    v1_values = np.asarray(v1_values).reshape(-1)
+    if v1_values.size != v1_row_idx.size:
+        raise ValueError(f"Expected {v1_row_idx.size} V1 values, got {v1_values.size}")
+
+    flat = np.full(int(np.prod(brain_nii_shape)), np.nan, dtype=np.float32)
+    flat[voxel_index[v1_row_idx]] = v1_values.astype(np.float32)
+    return flat.reshape(brain_nii_shape, order="C")
+
+
 def v1_response_to_volume(subject: str, model_variant: str, v1_values: np.ndarray) -> np.ndarray:
     """Place a (n_v1,) vector -- in the same voxel order `load_v1_weights`/
     `extract_v1_target` use -- back into a full (X,Y,Z) volume in the
@@ -411,13 +445,7 @@ def v1_response_to_volume(subject: str, model_variant: str, v1_values: np.ndarra
     slices. Voxels outside V1 are NaN.
     """
     voxel_index, v1_row_idx, brain_nii_shape = _v1_index_info(subject, model_variant)
-    v1_values = np.asarray(v1_values).reshape(-1)
-    if v1_values.size != v1_row_idx.size:
-        raise ValueError(f"Expected {v1_row_idx.size} V1 values for subject={subject!r}, got {v1_values.size}")
-
-    flat = np.full(int(np.prod(brain_nii_shape)), np.nan, dtype=np.float32)
-    flat[voxel_index[v1_row_idx]] = v1_values.astype(np.float32)
-    return flat.reshape(brain_nii_shape, order="C")
+    return place_values_in_volume(v1_values, voxel_index, v1_row_idx, brain_nii_shape)
 
 
 # ==============================================================================
