@@ -411,8 +411,8 @@ if not PIPELINE_AVAILABLE:
         "so layout/styling can be reviewed independently."
     )
 
-# Header + step-flow strip only shown before a result exists — once you've
-# run the pipeline, the results panel below is the point, not the intro.
+# Header + step-flow strip only shown before a result exists. Once you've
+# run the pipeline, the results panel below takes over.
 if "pv_result" not in st.session_state:
     # ----------------------------------------------------------------------
     # Header
@@ -427,13 +427,18 @@ if "pv_result" not in st.session_state:
                 photo. Step 2: another model guesses how the brain's vision area
                 would react to it. Step 3: a computer searches for the electrical
                 pattern that would create that same brain reaction. Step 4: a
-                simulator shows what that pattern would actually look like as a
+                simulator shows what that pattern would look like as a
                 pattern of light spots.
             </p>
-            <span class="pv-tag">real data · real computation · not real-time</span>
+            <span class="pv-tag">real data · real computation · a few seconds per photo</span>
         </div>
         """,
         unsafe_allow_html=True,
+    )
+    st.caption(
+        "This project started at UCSF during an internship on deep brain stimulation (DBS) "
+        "for treatment-resistant depression, and turns that same curiosity toward a cortical "
+        "visual prosthesis."
     )
 
     # Step-flow strip (static, explanatory — CNN-Explainer-style panel-per-stage)
